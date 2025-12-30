@@ -1,0 +1,23 @@
+@import "bootstrap/dist/css/bootstrap.min.css";
+
+body {
+  background-color: #f8f9fa;
+}
+.profit {
+  color: #198754;
+  font-weight: 600;
+}
+.loss {
+  color: #dc3545;
+  font-weight: 600;
+}
+.status-box {
+  background: #fff3cd;
+  border: 1px solid #ffecb5;
+  color: #664d03;
+  padding: 10px;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  text-align: center;
+  font-weight: 500;
+}
