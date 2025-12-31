@@ -17,15 +17,31 @@ export default function StockTable({ rows }) {
   });
 
   // =========================
-  // 🔥 PREVIOUS LTP TRACKER
+  // 🔥 LTP TRACKERS (SAFE)
   // =========================
   const prevLtpRef = useRef({});
+  const [ltpDir, setLtpDir] = useState({}); // UP | DOWN
 
+  // calculate LTP direction AFTER render
   useEffect(() => {
-    rows.forEach(r => {
-      if (r.ltp != null) {
-        prevLtpRef.current[r.symbol] ??= r.ltp;
-      }
+    setLtpDir(prevDir => {
+      const next = { ...prevDir };
+
+      rows.forEach(r => {
+        const prev = prevLtpRef.current[r.symbol];
+
+        if (prev != null && r.ltp != null) {
+          if (r.ltp > prev) next[r.symbol] = "UP";
+          else if (r.ltp < prev) next[r.symbol] = "DOWN";
+          else next[r.symbol] = "";
+        }
+
+        if (r.ltp != null) {
+          prevLtpRef.current[r.symbol] = r.ltp;
+        }
+      });
+
+      return next;
     });
   }, [rows]);
 
@@ -53,22 +69,6 @@ export default function StockTable({ rows }) {
       minimumFractionDigits: 0,
       maximumFractionDigits: 2
     });
-
-  // =========================
-  // SORT
-  // =========================
-  function onSort(key) {
-    setSortConfig(prev =>
-      prev.key === key
-        ? { key, direction: prev.direction === "asc" ? "desc" : "asc" }
-        : { key, direction: "asc" }
-    );
-  }
-
-  const arrow = key =>
-    sortConfig.key === key
-      ? sortConfig.direction === "asc" ? " ▲" : " ▼"
-      : "";
 
   // =========================
   // FILTER + SORT
@@ -143,18 +143,6 @@ export default function StockTable({ rows }) {
             />
           </div>
 
-          <div className="d-flex align-items-center gap-2">
-            <strong>Target %:</strong>
-            <input
-              type="number"
-              step="0.1"
-              className="form-control form-control-sm"
-              style={{ width: 80 }}
-              value={targetPct}
-              onChange={e => setTargetPct(+e.target.value || 0)}
-            />
-          </div>
-
           <span className="text-muted small">Margin: {MARGIN}×</span>
         </div>
 
@@ -193,16 +181,12 @@ export default function StockTable({ rows }) {
 
           <tbody>
             {processedRows.map(r => {
-              const prev = prevLtpRef.current[r.symbol];
               let ltpClass = "";
-
-              if (prev != null && r.ltp != null) {
-                if (r.ltp > prev) ltpClass = "bg-success text-white";
-                else if (r.ltp < prev) ltpClass = "bg-danger text-white";
+              if (ltpDir[r.symbol] === "UP") {
+                ltpClass = "bg-success text-white";
+              } else if (ltpDir[r.symbol] === "DOWN") {
+                ltpClass = "bg-danger text-white";
               }
-
-              // update previous
-              prevLtpRef.current[r.symbol] = r.ltp;
 
               const entry = r.open
                 ? +(r.open * (1 + breakoutPct / 100)).toFixed(2)
@@ -229,8 +213,6 @@ export default function StockTable({ rows }) {
                   <td><strong>{r.symbol}</strong></td>
                   <td>{r.open ?? "-"}</td>
                   <td>{entry}</td>
-
-                  {/* 🔥 LTP COLOR CELL */}
                   <td className={ltpClass}>{r.ltp}</td>
 
                   <td>
