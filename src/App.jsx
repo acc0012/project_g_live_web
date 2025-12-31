@@ -16,6 +16,21 @@ import StockTable from "./components/StockTable";
 
 const MARGIN = 5;
 
+// ==============================
+// HELPERS
+// ==============================
+function getPrevTradingDate(baseDate = null) {
+  const d = baseDate ? new Date(baseDate) : new Date();
+  d.setDate(d.getDate() - 1);
+
+  // Skip weekends
+  while (d.getDay() === 0 || d.getDay() === 6) {
+    d.setDate(d.getDate() - 1);
+  }
+
+  return d.toISOString().slice(0, 10);
+}
+
 // =================================================
 // APP
 // =================================================
@@ -30,14 +45,26 @@ export default function App() {
   const pollingRef = useRef(null);
 
   // =================================================
-  // LIVE MODE – INIT (ONCE PER DAY)
+  // LIVE MODE – INIT (ONCE PER DAY) WITH FALLBACK
   // =================================================
   async function initLiveOnce() {
-    const signalsRes = await fetchSignals();
+    let signalsRes = await fetchSignals();
 
+    // 🔁 FALLBACK TO PREVIOUS TRADING DAY
     if (!signalsRes.found) {
-      setStatus("BUY signals not available for today");
-      return;
+      const fallbackDate = getPrevTradingDate();
+      setStatus(
+        `No BUY signals for today. Trying ${fallbackDate}...`
+      );
+
+      signalsRes = await fetchSignals(fallbackDate);
+
+      if (!signalsRes.found) {
+        setStatus(
+          "No BUY signals found for today or previous trading day"
+        );
+        return;
+      }
     }
 
     const date = signalsRes.trade_date;
@@ -47,6 +74,7 @@ export default function App() {
     if (cached) {
       tradeStateRef.current = cached;
       initializedRef.current = true;
+      setStatus(`Live mode using signals from ${date}`);
       return;
     }
 
@@ -62,6 +90,8 @@ export default function App() {
     tradeStateRef.current = state;
     saveTradeState(date, state);
     initializedRef.current = true;
+
+    setStatus(`Live mode using signals from ${date}`);
   }
 
   // =================================================
@@ -70,7 +100,7 @@ export default function App() {
   async function liveTick() {
     if (!initializedRef.current) return;
 
-    const signalsRes = await fetchSignals();
+    const signalsRes = await fetchSignals(tradeDateRef.current);
     const signals = signalsRes.data;
     const ltpMap = await fetchCandlesLatest();
 
@@ -116,7 +146,6 @@ export default function App() {
     saveTradeState(tradeDateRef.current, nextState);
 
     setRows(rowsOut);
-    setStatus("");
   }
 
   // =================================================
@@ -202,7 +231,7 @@ export default function App() {
   }
 
   // =================================================
-  // CLEAR ALL DATA (NEW BUTTON)
+  // CLEAR ALL DATA
   // =================================================
   function clearAllData() {
     if (!window.confirm("Clear all cached data and reset app?")) return;
@@ -230,7 +259,6 @@ export default function App() {
   // LIVE STARTUP
   // =================================================
   useEffect(() => {
-    // ✅ CLEAR UI ON APP RESTART
     setRows([]);
     setStatus("");
 
@@ -252,7 +280,6 @@ export default function App() {
         Present time: {new Date().toLocaleTimeString()}
       </p>
 
-      {/* ===== CONTROLS ===== */}
       <div className="d-flex justify-content-center gap-2 mb-3">
         <input
           type="date"
@@ -285,7 +312,6 @@ export default function App() {
         </button>
       </div>
 
-      {/* ===== STATUS ===== */}
       {status && (
         <div className="status-box text-center mb-2">
           {status}
