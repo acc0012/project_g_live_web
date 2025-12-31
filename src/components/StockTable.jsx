@@ -15,7 +15,7 @@ export default function StockTable({ rows }) {
     key: "status",
     direction: "asc"
   });
-
+ 
   // =========================
   // 🔥 LTP TRACKERS (SAFE)
   // =========================
