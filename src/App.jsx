@@ -23,7 +23,6 @@ function getPrevTradingDate(baseDate = null) {
   const d = baseDate ? new Date(baseDate) : new Date();
   d.setDate(d.getDate() - 1);
 
-  // Skip weekends
   while (d.getDay() === 0 || d.getDay() === 6) {
     d.setDate(d.getDate() - 1);
   }
@@ -43,45 +42,42 @@ export default function App() {
   const tradeDateRef = useRef(null);
   const initializedRef = useRef(false);
   const pollingRef = useRef(null);
+  const signalsRef = useRef([]); // ✅ CACHE SIGNALS
 
   // =================================================
-  // LIVE MODE – INIT (ONCE PER DAY) WITH FALLBACK
+  // LIVE MODE – INIT (ONCE PER DAY)
   // =================================================
   async function initLiveOnce() {
     let signalsRes = await fetchSignals();
 
-    // 🔁 FALLBACK TO PREVIOUS TRADING DAY
     if (!signalsRes.found) {
       const fallbackDate = getPrevTradingDate();
-      setStatus(
-        `No BUY signals for today. Trying ${fallbackDate}...`
-      );
+      setStatus(`No BUY signals for today. Trying ${fallbackDate}...`);
 
       signalsRes = await fetchSignals(fallbackDate);
-
       if (!signalsRes.found) {
-        setStatus(
-          "No BUY signals found for today or previous trading day"
-        );
-        return;
+        setStatus("No BUY signals found for today or previous trading day");
+        return false;
       }
     }
 
     const date = signalsRes.trade_date;
     tradeDateRef.current = date;
 
+    const signals = signalsRes.data;
+    signalsRef.current = signals; // ✅ store once
+
     const cached = loadTradeState(date);
     if (cached) {
       tradeStateRef.current = cached;
       initializedRef.current = true;
       setStatus(`Live mode using signals from ${date}`);
-      return;
+      return true;
     }
 
-    const signals = signalsRes.data;
     const allCandles = await fetchCandlesFull();
-
     const state = {};
+
     signals.forEach(s => {
       const candles = allCandles[s.symbol] || [];
       state[s.symbol] = replayCandles(s, candles);
@@ -92,24 +88,25 @@ export default function App() {
     initializedRef.current = true;
 
     setStatus(`Live mode using signals from ${date}`);
+    return true;
   }
 
   // =================================================
-  // LIVE MODE – POLLING
+  // LIVE MODE – POLLING (ONLY LTP)
   // =================================================
   async function liveTick() {
     if (!initializedRef.current) return;
 
-    const signalsRes = await fetchSignals(tradeDateRef.current);
-    const signals = signalsRes.data;
-    const ltpMap = await fetchCandlesLatest();
+    const signals = signalsRef.current;
+    if (!signals.length) return;
 
+    const ltpMap = await fetchCandlesLatest();
     const nextState = { ...tradeStateRef.current };
     const rowsOut = [];
 
     signals.forEach(s => {
       const ltp = ltpMap[s.symbol];
-      if (!ltp) return;
+      if (ltp == null) return;
 
       const prev = nextState[s.symbol];
       const state = liveUpdate(s, ltp, prev);
@@ -144,12 +141,11 @@ export default function App() {
 
     tradeStateRef.current = nextState;
     saveTradeState(tradeDateRef.current, nextState);
-
-    setRows(rowsOut);
+    setRows(rowsOut); // ✅ THIS DRIVES UI
   }
 
   // =================================================
-  // HISTORICAL MODE
+  // HISTORICAL MODE (UNCHANGED)
   // =================================================
   async function runHistorical() {
     if (!inputDate) return;
@@ -162,31 +158,26 @@ export default function App() {
       pollingRef.current = null;
     }
 
-    const isoDate = inputDate;
-
-    const cached = loadHistorical(isoDate);
+    const cached = loadHistorical(inputDate);
     if (cached) {
       setRows(cached.results);
-      setStatus(`Historical breakout results for ${isoDate} (cached)`);
+      setStatus(`Historical breakout results for ${inputDate} (cached)`);
       return;
     }
 
-    const allCandles = await fetchCandlesByDate(isoDate);
-
+    const allCandles = await fetchCandlesByDate(inputDate);
     if (Object.values(allCandles).every(c => !c || c.length === 0)) {
       setStatus("Market holiday / no data for selected date");
       return;
     }
 
     const rowsOut = [];
-
     Object.entries(allCandles).forEach(([symbol, candles]) => {
       const r = breakoutFromOpen(candles);
       if (r.status === "NO_DATA") return;
 
       const effective =
-        r.exit_price ??
-        (r.status === "ENTERED" ? r.entry : r.open);
+        r.exit_price ?? (r.status === "ENTERED" ? r.entry : r.open);
 
       const pnl1 = +(effective - r.entry).toFixed(2);
       const pnlPct = +((pnl1 / r.entry) * 100).toFixed(2);
@@ -196,76 +187,46 @@ export default function App() {
         open: r.open,
         entry: r.entry,
         ltp: effective,
-
         status: r.status,
         entry_time: r.entry_time,
         exit_price: r.exit_price,
         exit_time: r.exit_time,
-
         qty: "-",
-        capital_used: "-",
-        margin_required: "-",
-
         pnl_pct: pnlPct,
-        pnl_capital: "-",
-        pnl_margin: "-",
-
-        updated_at: isoDate
+        updated_at: inputDate
       });
     });
 
-    saveHistorical(isoDate, {
-      date: isoDate,
+    saveHistorical(inputDate, {
+      date: inputDate,
       created_at: new Date().toISOString(),
-      params: {
-        entryPct: 0.03,
-        stoplossPct: 0.01,
-        rr: 1
-      },
-      candles: allCandles,
       results: rowsOut
     });
 
     setRows(rowsOut);
-    setStatus(`Historical breakout results for ${isoDate}`);
+    setStatus(`Historical breakout results for ${inputDate}`);
   }
 
   // =================================================
-  // CLEAR ALL DATA
-  // =================================================
-  function clearAllData() {
-    if (!window.confirm("Clear all cached data and reset app?")) return;
-
-    localStorage.clear();
-
-    tradeStateRef.current = {};
-    tradeDateRef.current = null;
-    initializedRef.current = false;
-
-    if (pollingRef.current) {
-      clearInterval(pollingRef.current);
-      pollingRef.current = null;
-    }
-
-    setRows([]);
-    setStatus("All local data cleared. Reloading live mode...");
-    setInputDate("");
-
-    initLiveOnce();
-    pollingRef.current = setInterval(liveTick, 3000);
-  }
-
-  // =================================================
-  // LIVE STARTUP
+  // LIVE STARTUP (FIXED)
   // =================================================
   useEffect(() => {
-    setRows([]);
-    setStatus("");
+    let cancelled = false;
 
-    initLiveOnce();
-    pollingRef.current = setInterval(liveTick, 3000);
+    async function startLive() {
+      setRows([]);
+      setStatus("");
+
+      const ok = await initLiveOnce();
+      if (!ok || cancelled) return;
+
+      pollingRef.current = setInterval(liveTick, 3000);
+    }
+
+    startLive();
 
     return () => {
+      cancelled = true;
       if (pollingRef.current) clearInterval(pollingRef.current);
     };
   }, []);
@@ -303,19 +264,10 @@ export default function App() {
         >
           Back to Live
         </button>
-
-        <button
-          className="btn btn-danger"
-          onClick={clearAllData}
-        >
-          Clear Data
-        </button>
       </div>
 
       {status && (
-        <div className="status-box text-center mb-2">
-          {status}
-        </div>
+        <div className="status-box text-center mb-2">{status}</div>
       )}
 
       <StockTable rows={rows} />
