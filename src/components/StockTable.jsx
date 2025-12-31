@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 
 const DEFAULT_CAPITAL = 20000;
 const DEFAULT_BREAKOUT = 3; // %
@@ -15,6 +15,19 @@ export default function StockTable({ rows }) {
     key: "status",
     direction: "asc"
   });
+
+  // =========================
+  // 🔥 PREVIOUS LTP TRACKER
+  // =========================
+  const prevLtpRef = useRef({});
+
+  useEffect(() => {
+    rows.forEach(r => {
+      if (r.ltp != null) {
+        prevLtpRef.current[r.symbol] ??= r.ltp;
+      }
+    });
+  }, [rows]);
 
   // =========================
   // HELPERS
@@ -159,11 +172,11 @@ export default function StockTable({ rows }) {
         <table className="table table-sm align-middle text-center">
           <thead style={{ background: "#f8f9fa" }}>
             <tr>
-              <th onClick={() => onSort("symbol")}>Symbol{arrow("symbol")}</th>
+              <th>Symbol</th>
               <th>Open</th>
               <th>Entry ({breakoutPct}%)</th>
               <th>LTP</th>
-              <th onClick={() => onSort("status")}>Status{arrow("status")}</th>
+              <th>Status</th>
               <th>Entry Time</th>
               <th>Exit</th>
               <th>Exit Time</th>
@@ -172,7 +185,7 @@ export default function StockTable({ rows }) {
               <th>Max Qty</th>
               <th>Qty</th>
               <th>Capital Used</th>
-              <th>Margin Req ({MARGIN}×)</th>
+              <th>Margin Req</th>
               <th>₹ P/L</th>
               <th>Updated</th>
             </tr>
@@ -180,19 +193,24 @@ export default function StockTable({ rows }) {
 
           <tbody>
             {processedRows.map(r => {
-              // ENTRY
+              const prev = prevLtpRef.current[r.symbol];
+              let ltpClass = "";
+
+              if (prev != null && r.ltp != null) {
+                if (r.ltp > prev) ltpClass = "bg-success text-white";
+                else if (r.ltp < prev) ltpClass = "bg-danger text-white";
+              }
+
+              // update previous
+              prevLtpRef.current[r.symbol] = r.ltp;
+
               const entry = r.open
                 ? +(r.open * (1 + breakoutPct / 100)).toFixed(2)
                 : r.entry;
 
-              // TARGET
-              const targetPrice = +(entry * (1 + targetPct / 100)).toFixed(2);
-
-              // EXIT PRICE (priority-based)
-              let exitPrice = entry;
-              if (r.status === "ENTERED") exitPrice = r.ltp;
-              if (r.status === "EXITED_TARGET") exitPrice = targetPrice;
-              if (r.exit_price != null) exitPrice = r.exit_price;
+              const exitPrice =
+                r.exit_price ??
+                (r.status === "ENTERED" ? r.ltp : entry);
 
               const profitPerShare = +(exitPrice - entry).toFixed(2);
               const pnlPct = entry
@@ -211,7 +229,9 @@ export default function StockTable({ rows }) {
                   <td><strong>{r.symbol}</strong></td>
                   <td>{r.open ?? "-"}</td>
                   <td>{entry}</td>
-                  <td>{r.ltp}</td>
+
+                  {/* 🔥 LTP COLOR CELL */}
+                  <td className={ltpClass}>{r.ltp}</td>
 
                   <td>
                     <span className={`badge ${badge(r.status)}`}>
@@ -220,10 +240,7 @@ export default function StockTable({ rows }) {
                   </td>
 
                   <td>{r.entry_time || "-"}</td>
-                  <td>
-                    {r.exit_price ??
-                      (r.status === "EXITED_TARGET" ? targetPrice : "-")}
-                  </td>
+                  <td>{r.exit_price ?? "-"}</td>
                   <td>{r.exit_time || "-"}</td>
 
                   <td className={pnlClass(pnlPct)}>{pnlPct}%</td>

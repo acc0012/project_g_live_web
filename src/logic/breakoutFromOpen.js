@@ -2,7 +2,7 @@ export function breakoutFromOpen(candles, params = {}) {
   const {
     entryPct = 0.05,      // +3% breakout from open
     stoplossPct = 0.01,   // -1% from open
-    rr = 1                // Risk–Reward ratio (1 = 1:1, 2 = 1:2)
+    rr = 1               // Risk–Reward ratio
   } = params;
 
   if (!candles || candles.length === 0) {
@@ -13,6 +13,17 @@ export function breakoutFromOpen(candles, params = {}) {
   // NORMALIZE TIMESTAMP → MS
   // ==============================
   const toMs = ts => (ts < 1e12 ? ts * 1000 : ts);
+
+  // ==============================
+  // ENTRY TIME RULE (>= 09:20)
+  // ==============================
+  const isAfter920 = ts => {
+    const d = new Date(ts);
+    return (
+      d.getHours() > 9 ||
+      (d.getHours() === 9 && d.getMinutes() >= 20)
+    );
+  };
 
   // ==============================
   // FIND VALID OPEN CANDLE
@@ -50,10 +61,7 @@ export function breakoutFromOpen(candles, params = {}) {
   const entry = +(open * (1 + entryPct)).toFixed(2);
   const stoploss = +(open * (1 - stoplossPct)).toFixed(2);
 
-  // Risk per share
   const risk = +(entry - stoploss).toFixed(2);
-
-  // RR-based target
   const target = +(entry + risk * rr).toFixed(2);
 
   let state = {
@@ -84,8 +92,12 @@ export function breakoutFromOpen(candles, params = {}) {
       minute: "2-digit"
     });
 
-    // ENTRY
-    if (state.status === "PENDING" && high >= entry) {
+    // ✅ ENTRY ONLY AFTER 09:20
+    if (
+      state.status === "PENDING" &&
+      isAfter920(ts) &&
+      high >= entry
+    ) {
       state.status = "ENTERED";
       state.entry_time = time;
       continue;
